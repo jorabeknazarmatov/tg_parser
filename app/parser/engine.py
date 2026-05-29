@@ -96,8 +96,8 @@ class ParserEngine:
                     await self._task_repo.update_status(task_id, "stopped")
                     return
 
-                # Получаем доступный клиент
-                client_data = await self._account_manager.get_available_client()
+                # Получаем доступный клиент (без лимита sent_today)
+                client_data = await self._account_manager.get_available_client_for_parse()
                 if client_data is None:
                     logger.error("Нет доступных аккаунтов для парсинга")
                     await self._task_repo.update_status(task_id, "failed")

@@ -45,6 +45,21 @@ class AccountRepository:
         )
         return list(result.scalars().all())
 
+    async def get_active_for_parse(self) -> list[Account]:
+        """
+        Возвращает аккаунты доступные для парсинга.
+        В отличие от get_active() — не проверяет лимит sent_today,
+        так как парсинг не тратит дневной лимит отправок.
+        """
+        now = datetime.now(tz=timezone.utc)
+        result = await self._session.execute(
+            select(Account).where(
+                Account.status == "active",
+                (Account.flood_until == None) | (Account.flood_until <= now),  # noqa: E711
+            )
+        )
+        return list(result.scalars().all())
+
     async def get_by_name(self, session_name: str) -> Account | None:
         """Возвращает аккаунт по имени сессии."""
         result = await self._session.execute(

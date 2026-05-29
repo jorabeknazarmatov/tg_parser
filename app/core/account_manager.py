@@ -133,6 +133,53 @@ class AccountManager:
                     error=str(exc),
                 )
 
+    async def get_available_client_for_parse(
+        self,
+    ) -> Optional[tuple[TelegramClient, "Account"]]:
+        """
+        Возвращает доступный клиент для парсинга.
+        Не проверяет лимит sent_today — парсинг не расходует дневной лимит.
+        """
+        async with self._lock:
+            active_accounts = await self._account_repo.get_active_for_parse()
+
+            if not active_accounts:
+                logger.error(
+                    "Нет аккаунтов со статусом active в БД (для парсинга)",
+                    total_clients=len(self._clients),
+                )
+                return None
+
+            for account in active_accounts:
+                name = account.session_name
+                if name not in self._clients:
+                    logger.warning("Аккаунт есть в БД, но нет клиента", session=name)
+                    continue
+                if name in self._in_use:
+                    continue
+
+                client = self._clients[name]
+                if not client.is_connected():
+                    try:
+                        await client.connect()
+                    except Exception as exc:
+                        logger.error("Не удалось переподключить клиент", session=name, error=str(exc))
+                        continue
+
+                if not await client.is_user_authorized():
+                    logger.warning("Сессия не авторизована", session=name)
+                    continue
+
+                self._in_use.add(name)
+                return client, account
+
+            logger.error(
+                "Все active аккаунты заняты или не авторизованы (парсинг)",
+                active_in_db=len(active_accounts),
+                in_use=len(self._in_use),
+            )
+            return None
+
     async def get_available_client(
         self,
     ) -> Optional[tuple[TelegramClient, "Account"]]:
@@ -144,34 +191,48 @@ class AccountManager:
             Кортеж (client, account) или None если нет доступных
         """
         async with self._lock:
-            # Получаем активные аккаунты из базы данных
             active_accounts = await self._account_repo.get_active()
+
+            if not active_accounts:
+                logger.error(
+                    "Нет аккаунтов со статусом active в БД (для отправки)",
+                    total_clients=len(self._clients),
+                )
+                return None
 
             for account in active_accounts:
                 name = account.session_name
-                # Проверяем что аккаунт не занят и клиент существует
-                if name not in self._in_use and name in self._clients:
-                    client = self._clients[name]
+                if name not in self._clients:
+                    logger.warning("Аккаунт есть в БД, но нет клиента", session=name)
+                    continue
+                if name in self._in_use:
+                    continue
 
-                    # Проверяем соединение
-                    if not client.is_connected():
-                        try:
-                            await client.connect()
-                        except Exception as exc:
-                            logger.error(
-                                "Не удалось переподключить клиент",
-                                session=name,
-                                error=str(exc),
-                            )
-                            continue
+                client = self._clients[name]
 
-                    if not await client.is_user_authorized():
-                        logger.warning("Сессия не авторизована", session=name)
+                if not client.is_connected():
+                    try:
+                        await client.connect()
+                    except Exception as exc:
+                        logger.error(
+                            "Не удалось переподключить клиент",
+                            session=name,
+                            error=str(exc),
+                        )
                         continue
 
-                    self._in_use.add(name)
-                    return client, account
+                if not await client.is_user_authorized():
+                    logger.warning("Сессия не авторизована", session=name)
+                    continue
 
+                self._in_use.add(name)
+                return client, account
+
+            logger.error(
+                "Все active аккаунты заняты или не авторизованы (отправка)",
+                active_in_db=len(active_accounts),
+                in_use=len(self._in_use),
+            )
             return None
 
     def release_client(self, session_name: str) -> None:
