@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Optional
 from telethon import TelegramClient
 
 from app.core.logging import get_logger
+from app.core.userbot_loader import load_userbot_configs
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -31,27 +32,28 @@ class AccountManager:
         settings: "Settings",
         account_repo: "AccountRepository",
     ) -> None:
-        # Настройки приложения (API_ID, API_HASH)
         self._settings = settings
-        # Репозиторий аккаунтов для получения статусов
         self._account_repo = account_repo
-        # Словарь активных клиентов: session_name -> TelegramClient
+        # session_name -> TelegramClient
         self._clients: dict[str, TelegramClient] = {}
-        # Множество занятых аккаунтов (в процессе использования)
+        # занятые аккаунты (в процессе отправки)
         self._in_use: set[str] = set()
-        # Блокировка для потокобезопасного доступа к _in_use
         self._lock = asyncio.Lock()
 
     async def load_sessions(self) -> int:
         """
-        Загружает все .session файлы из директории sessions/.
-        Создаёт TelegramClient для каждого файла.
+        Загружает .session файлы из директории sessions/.
+        Для каждого файла ищет api_id/api_hash в userbot.json;
+        если не найден — использует глобальные настройки из .env.
 
         Returns:
             Количество успешно загруженных сессий
         """
         sessions_dir = Path("sessions")
         sessions_dir.mkdir(exist_ok=True)
+
+        # Читаем userbot.json (session_name -> UserbotConfig)
+        userbot_configs = load_userbot_configs()
 
         session_files = list(sessions_dir.glob("*.session"))
         logger.info("Найдено сессий", count=len(session_files))
@@ -60,15 +62,31 @@ class AccountManager:
         for session_file in session_files:
             session_name = session_file.stem
             try:
-                # Создаём клиент (ещё не подключаем)
+                # Берём api_id/api_hash из userbot.json или из глобальных настроек
+                cfg = userbot_configs.get(session_name)
+                if cfg:
+                    api_id = cfg.api_id
+                    api_hash = cfg.api_hash
+                    logger.info(
+                        "Используются credentials из userbot.json",
+                        session=session_name,
+                        number=cfg.number,
+                    )
+                else:
+                    api_id = self._settings.API_ID
+                    api_hash = self._settings.API_HASH
+                    logger.info(
+                        "Используются глобальные credentials",
+                        session=session_name,
+                    )
+
                 client = TelegramClient(
                     str(session_file),
-                    self._settings.API_ID,
-                    self._settings.API_HASH,
+                    api_id,
+                    api_hash,
                 )
                 self._clients[session_name] = client
 
-                # Регистрируем или обновляем запись в базе данных
                 await self._account_repo.create_or_update(session_name)
                 loaded += 1
 
