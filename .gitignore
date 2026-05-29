@@ -1,0 +1,48 @@
+# Файлы окружения
+.env
+*.env
+
+# Директория с сессиями (содержит приватные данные)
+sessions/
+
+# База данных
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Логи
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Виртуальные окружения
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Docker
+.docker/
+
+# Тесты
+.pytest_cache/
+.coverage
+htmlcov/

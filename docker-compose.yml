@@ -1,0 +1,58 @@
+# Docker Compose конфигурация для Telegram Parser + Mass DM
+version: "3.9"
+
+services:
+  tg_parser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    container_name: tg_parser
+    restart: unless-stopped
+
+    # Переменные окружения из файла .env
+    env_file:
+      - .env
+
+    # Монтируем тома для персистентных данных
+    volumes:
+      # Файлы сессий Telegram (должны быть защищены chmod 700)
+      - ./sessions:/app/sessions:rw
+      # Данные приложения (конфиги, сообщения, списки парсинга)
+      - ./data:/app/data:rw
+      # Файлы логов
+      - ./logs:/app/logs:rw
+      # Медиафайлы для рассылки
+      - ./media:/app/media:rw
+
+    # Ограничения ресурсов
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+    # Логирование
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Проверка работоспособности
+    healthcheck:
+      test: ["CMD", "python", "-c", "import app.core.config; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Именованные тома (альтернативно можно использовать bind mounts выше)
+# volumes:
+#   sessions_data:
+#   app_data:
+#   app_logs:
+#   media_data:
