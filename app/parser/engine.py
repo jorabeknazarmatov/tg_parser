@@ -304,6 +304,7 @@ class ParserEngine:
             "phone": getattr(user, "phone", None),
             "source_chat": entity_name,
             "matched_keyword": keyword,
+            "message_text": (message.message or "")[:4096],
             "last_activity_date": msg_date,
             "unique_hash": validator.make_hash(user.id, entity_name),
         }

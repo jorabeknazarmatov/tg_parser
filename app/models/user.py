@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -42,6 +42,9 @@ class User(Base):
 
     # Ключевое слово, по которому найден пользователь
     matched_keyword: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Текст сообщения, в котором найдено ключевое слово
+    message_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Дата последней активности пользователя в источнике
     last_activity_date: Mapped[datetime] = mapped_column(

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from aiogram import Dispatcher, Router
 
-from app.handlers import accounts, find, send_test, start, stats, status, stop
+from app.handlers import accounts, export_users, find, send_test, start, stats, status, stop
 
 
 def register_all_handlers(dp: Dispatcher) -> None:
@@ -26,6 +26,7 @@ def register_all_handlers(dp: Dispatcher) -> None:
     main_router.include_router(stats.router)
     main_router.include_router(accounts.router)
     main_router.include_router(send_test.router)
+    main_router.include_router(export_users.router)
 
     # Регистрируем главный роутер в диспетчере
     dp.include_router(main_router)

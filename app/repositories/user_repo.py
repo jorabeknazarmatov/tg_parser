@@ -115,6 +115,13 @@ class UserRepository:
         )
         return result.scalar_one()
 
+    async def get_all_for_export(self) -> list[User]:
+        """Возвращает всех пользователей для экспорта в JSON."""
+        result = await self._session.execute(
+            select(User).order_by(User.parsed_at.asc())
+        )
+        return list(result.scalars().all())
+
     async def count_unsent(self) -> int:
         """Возвращает количество пользователей ожидающих отправки."""
         result = await self._session.execute(
