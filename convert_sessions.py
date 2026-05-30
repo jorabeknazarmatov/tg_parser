@@ -1,16 +1,20 @@
 """
-Конвертер сессий Pyrogram → Telethon.
-Читает существующие .session файлы (Pyrogram) и создаёт совместимые
-с Telethon без необходимости повторной авторизации (SMS-код не нужен).
+Конвертер .session файлов для совместимости с текущей версией Telethon.
+
+Проблема: сессии созданы более новой версией Telethon, которая добавила
+колонку tmp_auth_key (итого 6 колонок). Текущая версия Telethon ожидает
+5 колонок и падает с ошибкой "too many values to unpack (expected 5)".
+
+Решение: пересоздать таблицу sessions без лишней колонки tmp_auth_key.
+auth_key сохраняется — повторная авторизация не нужна.
 
 Использование:
     python convert_sessions.py
 """
 from __future__ import annotations
 
-import os
-import sqlite3
 import shutil
+import sqlite3
 from pathlib import Path
 
 
@@ -26,252 +30,242 @@ DC_ADDRESSES: dict[int, tuple[str, int]] = {
 }
 
 
-def detect_format(session_path: Path) -> str:
+def get_column_count(session_path: Path) -> int | None:
     """
-    Определяет формат .session файла.
-
-    Returns:
-        "telethon"  — уже в нужном формате
-        "pyrogram"  — формат Pyrogram (7 колонок)
-        "unknown"   — нераспознанный формат
-        "empty"     — пустая таблица sessions
+    Возвращает количество колонок в таблице sessions.
+    None если файл нечитаем или таблица отсутствует.
     """
     try:
         conn = sqlite3.connect(session_path)
         cur = conn.cursor()
-
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'")
         if not cur.fetchone():
             conn.close()
-            return "unknown"
-
+            return None
         cur.execute("SELECT * FROM sessions LIMIT 1")
         row = cur.fetchone()
         conn.close()
-
         if row is None:
-            return "empty"
-        if len(row) == 5:
-            return "telethon"
-        if len(row) == 7:
-            return "pyrogram"
-        return "unknown"
-
+            # Таблица пустая — считаем через PRAGMA
+            conn = sqlite3.connect(session_path)
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info(sessions)")
+            cols = cur.fetchall()
+            conn.close()
+            return len(cols) if cols else None
+        return len(row)
     except sqlite3.DatabaseError:
-        return "unknown"
-
-
-def read_pyrogram_session(session_path: Path) -> dict | None:
-    """
-    Читает данные из Pyrogram .session файла.
-
-    Pyrogram sessions таблица:
-        dc_id INTEGER, api_id INTEGER, test_mode INTEGER,
-        auth_key BLOB, date INTEGER, user_id INTEGER, is_bot INTEGER
-
-    Returns:
-        Словарь с dc_id, auth_key или None при ошибке
-    """
-    try:
-        conn = sqlite3.connect(session_path)
-        cur = conn.cursor()
-        cur.execute("SELECT dc_id, auth_key FROM sessions LIMIT 1")
-        row = cur.fetchone()
-        conn.close()
-
-        if not row:
-            return None
-
-        dc_id, auth_key = row
-        return {"dc_id": dc_id, "auth_key": auth_key}
-
-    except Exception as e:
-        print(f"  ❌ Ошибка чтения Pyrogram-сессии: {e}")
         return None
 
 
-def create_telethon_session(session_path: Path, dc_id: int, auth_key: bytes) -> bool:
+def read_session_data(session_path: Path) -> dict | None:
     """
-    Создаёт .session файл в формате Telethon.
-
-    Telethon sessions таблица:
-        dc_id INTEGER NOT NULL, server_address TEXT,
-        port INTEGER, auth_key BLOB, takeout_id INTEGER
-
-    Args:
-        session_path: Путь к новому .session файлу
-        dc_id: Номер датацентра Telegram
-        auth_key: Ключ авторизации (256 байт)
-
-    Returns:
-        True если файл создан успешно
+    Читает dc_id, server_address, port, auth_key из таблицы sessions.
+    Работает с любым количеством колонок (5, 6 и более).
     """
-    server_address, port = DC_ADDRESSES.get(dc_id, ("149.154.167.51", 443))
-
     try:
         conn = sqlite3.connect(session_path)
         cur = conn.cursor()
+        cur.execute(
+            "SELECT dc_id, server_address, port, auth_key FROM sessions LIMIT 1"
+        )
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        dc_id, server_address, port, auth_key = row
+        # Если server_address пустой — берём из таблицы DC
+        if not server_address:
+            server_address, port = DC_ADDRESSES.get(dc_id, ("149.154.167.51", 443))
+        return {
+            "dc_id": dc_id,
+            "server_address": server_address,
+            "port": port,
+            "auth_key": auth_key,
+        }
+    except Exception as e:
+        print(f"  ❌ Ошибка чтения сессии: {e}")
+        return None
 
-        # Создаём все таблицы в формате Telethon
-        cur.executescript("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                dc_id     INTEGER NOT NULL,
-                server_address TEXT,
-                port      INTEGER,
-                auth_key  BLOB,
-                takeout_id INTEGER
+
+def rewrite_session(session_path: Path, data: dict) -> bool:
+    """
+    Пересоздаёт .session файл в стандартном формате Telethon (5 колонок).
+    Все остальные таблицы (entities, update_state и т.д.) копируются из оригинала.
+    """
+    tmp_path = session_path.with_suffix(".session.tmp")
+
+    try:
+        # Открываем оригинал для копирования остальных таблиц
+        src_conn = sqlite3.connect(session_path)
+        src_cur = src_conn.cursor()
+
+        # Создаём новый файл
+        dst_conn = sqlite3.connect(tmp_path)
+        dst_cur = dst_conn.cursor()
+
+        # Стандартная схема Telethon (5 колонок)
+        dst_cur.executescript("""
+            CREATE TABLE sessions (
+                dc_id          integer primary key,
+                server_address text,
+                port           integer,
+                auth_key       blob,
+                takeout_id     integer
             );
-
-            CREATE TABLE IF NOT EXISTS entities (
-                id       INTEGER PRIMARY KEY,
-                hash     INTEGER NOT NULL,
-                username TEXT,
-                phone    TEXT,
-                name     TEXT,
-                date     INTEGER
+            CREATE TABLE entities (
+                id       integer primary key,
+                hash     integer not null,
+                username text,
+                phone    integer,
+                name     text,
+                date     integer
             );
-
-            CREATE TABLE IF NOT EXISTS sent_files (
-                md5_digest BLOB,
-                file_size  INTEGER,
-                type       INTEGER,
-                id         TEXT,
-                hash       INTEGER,
-                PRIMARY KEY (md5_digest, file_size, type)
+            CREATE TABLE sent_files (
+                md5_digest blob,
+                file_size  integer,
+                type       integer,
+                id         integer,
+                hash       integer,
+                primary key (md5_digest, file_size, type)
             );
-
-            CREATE TABLE IF NOT EXISTS update_state (
-                id   INTEGER PRIMARY KEY,
-                pts  INTEGER,
-                qts  INTEGER,
-                date INTEGER,
-                seq  INTEGER
+            CREATE TABLE update_state (
+                id   integer primary key,
+                pts  integer,
+                qts  integer,
+                date integer,
+                seq  integer
             );
-
-            CREATE TABLE IF NOT EXISTS version (
-                version INTEGER
+            CREATE TABLE version (
+                version integer primary key
             );
         """)
 
-        # Записываем данные сессии
-        cur.execute(
-            "INSERT INTO sessions VALUES (?, ?, ?, ?, ?)",
-            (dc_id, server_address, port, auth_key, None),
+        # Записываем сессию (5 колонок, без tmp_auth_key)
+        dst_cur.execute(
+            "INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?, ?)",
+            (data["dc_id"], data["server_address"], data["port"], data["auth_key"], None),
         )
-        cur.execute("INSERT INTO version VALUES (?)", (1,))
-        conn.commit()
-        conn.close()
+
+        # Копируем entities если есть
+        try:
+            src_cur.execute("SELECT id, hash, username, phone, name, date FROM entities")
+            rows = src_cur.fetchall()
+            if rows:
+                dst_cur.executemany(
+                    "INSERT OR IGNORE INTO entities VALUES (?, ?, ?, ?, ?, ?)", rows
+                )
+                print(f"  📦 Скопировано entities: {len(rows)}")
+        except sqlite3.OperationalError:
+            pass
+
+        # Копируем update_state если есть
+        try:
+            src_cur.execute("SELECT id, pts, qts, date, seq FROM update_state")
+            rows = src_cur.fetchall()
+            if rows:
+                dst_cur.executemany(
+                    "INSERT OR IGNORE INTO update_state VALUES (?, ?, ?, ?, ?)", rows
+                )
+        except sqlite3.OperationalError:
+            pass
+
+        dst_cur.execute("INSERT OR IGNORE INTO version VALUES (1)")
+        dst_conn.commit()
+        dst_conn.close()
+        src_conn.close()
+
+        # Заменяем оригинал
+        session_path.unlink()
+        tmp_path.rename(session_path)
         return True
 
     except Exception as e:
-        print(f"  ❌ Ошибка создания Telethon-сессии: {e}")
+        print(f"  ❌ Ошибка пересоздания сессии: {e}")
+        if tmp_path.exists():
+            tmp_path.unlink()
         return False
 
 
-def convert_session(session_file: Path) -> bool:
+def convert_session(session_file: Path) -> str:
     """
-    Конвертирует один .session файл из формата Pyrogram в Telethon.
-    Оригинальный файл сохраняется с расширением .session.bak
+    Конвертирует один .session файл.
 
     Returns:
-        True если конвертация прошла успешно
+        "ok"      — уже совместима, ничего не делали
+        "fixed"   — исправлена успешно
+        "failed"  — ошибка
     """
-    name = session_file.stem
-    fmt = detect_format(session_file)
+    col_count = get_column_count(session_file)
+    print(f"\n  📄 {session_file.name}  →  колонок в sessions: {col_count}")
 
-    print(f"\n  📄 {session_file.name}  →  формат: {fmt}")
+    if col_count == 5:
+        print(f"  ✅ Уже совместима с Telethon, пропускаем.")
+        return "ok"
 
-    if fmt == "telethon":
-        print(f"  ✅ Уже в формате Telethon, пропускаем.")
-        return True
+    if col_count is None:
+        print(f"  ⚠️  Не удалось прочитать файл.")
+        return "failed"
 
-    if fmt in ("unknown", "empty"):
-        print(f"  ⚠️  Нераспознанный формат, пропускаем.")
-        return False
-
-    # Читаем данные из Pyrogram-сессии
-    data = read_pyrogram_session(session_file)
+    # Читаем данные авторизации
+    data = read_session_data(session_file)
     if not data:
-        print(f"  ❌ Не удалось прочитать данные сессии.")
-        return False
+        print(f"  ❌ Данные сессии пусты.")
+        return "failed"
 
-    dc_id    = data["dc_id"]
-    auth_key = data["auth_key"]
-    print(f"  📡 DC ID: {dc_id},  auth_key: {len(auth_key)} байт")
+    print(f"  📡 DC {data['dc_id']}  {data['server_address']}:{data['port']}")
+    print(f"  🔑 auth_key: {len(data['auth_key'])} байт")
 
-    # Делаем резервную копию оригинала
-    backup_path = session_file.with_suffix(".session.bak")
-    shutil.copy2(session_file, backup_path)
-    print(f"  💾 Резервная копия: {backup_path.name}")
+    # Резервная копия
+    backup = session_file.with_suffix(".session.bak")
+    shutil.copy2(session_file, backup)
+    print(f"  💾 Резервная копия: {backup.name}")
 
-    # Удаляем старый файл и создаём новый в формате Telethon
-    session_file.unlink()
-    success = create_telethon_session(session_file, dc_id, auth_key)
-
+    success = rewrite_session(session_file, data)
     if success:
-        print(f"  ✅ Конвертирован успешно!")
+        print(f"  ✅ Исправлена! (было {col_count} колонок → стало 5)")
+        return "fixed"
     else:
-        # Восстанавливаем резервную копию при ошибке
-        shutil.copy2(backup_path, session_file)
+        # Восстанавливаем оригинал
+        shutil.copy2(backup, session_file)
         print(f"  🔄 Оригинал восстановлен из резервной копии.")
-
-    return success
+        return "failed"
 
 
 def main() -> None:
-    """Конвертирует все Pyrogram .session файлы в директории sessions/."""
-    print("=" * 50)
-    print("  Конвертер сессий: Pyrogram → Telethon")
-    print("=" * 50)
+    """Конвертирует все несовместимые .session файлы в директории sessions/."""
+    print("=" * 52)
+    print("  Исправление .session файлов для Telethon")
+    print("=" * 52)
 
     if not SESSIONS_DIR.exists():
         print(f"❌ Директория {SESSIONS_DIR} не найдена.")
         return
 
-    session_files = [
+    session_files = sorted(
         f for f in SESSIONS_DIR.glob("*.session")
         if not f.name.endswith(".bak")
-    ]
+    )
 
     if not session_files:
         print(f"⚠️  В директории {SESSIONS_DIR} нет .session файлов.")
         return
 
-    print(f"\n📋 Найдено .session файлов: {len(session_files)}")
+    print(f"\n📋 Найдено файлов: {len(session_files)}")
 
-    success = 0
-    skipped = 0
-    failed  = 0
-
-    for session_file in sorted(session_files):
+    results = {"ok": 0, "fixed": 0, "failed": 0}
+    for session_file in session_files:
         result = convert_session(session_file)
-        fmt = detect_format(session_file)
-        if fmt == "telethon" and result:
-            if "Уже в формате" in "":  # отслеживаем через detect до конвертации
-                skipped += 1
-            else:
-                success += 1
-        elif not result:
-            failed += 1
+        results[result] += 1
 
-    # Пересчёт: смотрим финальные форматы
-    success = skipped = failed = 0
-    for session_file in sorted(session_files):
-        fmt = detect_format(session_file)
-        if fmt == "telethon":
-            success += 1
-        else:
-            failed += 1
+    print(f"\n{'=' * 52}")
+    print(f"✅ Уже совместимы:  {results['ok']}")
+    print(f"🔧 Исправлено:      {results['fixed']}")
+    print(f"❌ Ошибки:          {results['failed']}")
+    print(f"{'=' * 52}")
 
-    print(f"\n{'=' * 50}")
-    print(f"✅ Готово к работе:  {success}")
-    print(f"❌ Не конвертировано: {failed}")
-    print(f"{'=' * 50}")
-
-    if success > 0:
+    if results["fixed"] + results["ok"] > 0:
         print("\n🚀 Запускайте бот: python main.py")
-    if failed > 0:
-        print("⚠️  Резервные копии сохранены с расширением .session.bak")
 
 
 if __name__ == "__main__":
