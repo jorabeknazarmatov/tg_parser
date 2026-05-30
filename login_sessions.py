@@ -4,6 +4,9 @@
 
 Использование:
     python login_sessions.py
+
+Примечание: если .session файлы созданы Pyrogram-ом или другой библиотекой,
+скрипт автоматически удалит их и создаст новые совместимые с Telethon.
 """
 from __future__ import annotations
 
@@ -13,6 +16,8 @@ import os
 
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
+
+from app.core.session_checker import is_telethon_session
 
 
 USERBOT_JSON_PATH = os.path.join("sessions", "userbot.json")
@@ -29,11 +34,21 @@ def load_userbot_json() -> dict:
         return json.load(f)
 
 
+def delete_session_file(session_path: str) -> None:
+    """Удаляет .session файл по пути."""
+    full_path = session_path if session_path.endswith(".session") else session_path + ".session"
+    if os.path.exists(full_path):
+        os.remove(full_path)
+        print(f"🗑  Старый файл сессии удалён: {os.path.basename(full_path)}")
+
+
 async def login_user(username: str, user_info: dict) -> TelegramClient | None:
     """
     Авторизует один аккаунт Telegram.
     Если сессия уже существует и действительна — просто подключается.
-    При отсутствии сессии запрашивает код подтверждения и при необходимости 2FA-пароль.
+    Если сессия несовместима (например, создана Pyrogram) — удаляет её
+    и выполняет авторизацию заново.
+    При отсутствии сессии запрашивает код подтверждения и 2FA-пароль.
 
     Args:
         username: Ключ пользователя из userbot.json (например "1", "2")
@@ -45,13 +60,18 @@ async def login_user(username: str, user_info: dict) -> TelegramClient | None:
     print(f"\n{'─' * 40}")
     print(f"🔄 Авторизация аккаунта user_{username}...")
 
-    phone    = user_info["number"]
-    api_id   = int(user_info["api_id"])
-    api_hash = user_info["api_hash"]
+    phone        = user_info["number"]
+    api_id       = int(user_info["api_id"])
+    api_hash     = user_info["api_hash"]
     session_name = user_info.get("session", f"user_{username}")
 
-    # Путь к файлу сессии (sessions/user_1.session и т.д.)
+    # Путь к файлу сессии (sessions/user_1 — без .session, Telethon добавит сам)
     session_path = os.path.join("sessions", session_name)
+
+    # Проверяем совместимость существующего файла сессии
+    if not is_telethon_session(session_path):
+        print(f"⚠️  Файл сессии несовместим с Telethon (создан другой библиотекой).")
+        delete_session_file(session_path)
 
     client = TelegramClient(session_path, api_id, api_hash)
 
