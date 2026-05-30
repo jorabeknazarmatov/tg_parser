@@ -12,7 +12,6 @@ from telethon import TelegramClient
 
 from app.core.logging import get_logger
 from app.core.userbot_loader import load_userbot_configs
-from app.core.session_checker import is_telethon_session
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -80,17 +79,6 @@ class AccountManager:
                         "Используются глобальные credentials",
                         session=session_name,
                     )
-
-                # Проверяем совместимость файла сессии с Telethon.
-                # Pyrogram и другие библиотеки создают .session с иной схемой БД.
-                if not is_telethon_session(str(session_file)):
-                    logger.error(
-                        "Файл сессии несовместим с Telethon (возможно, создан Pyrogram). "
-                        "Удалите файл и выполните re-login: python login_sessions.py",
-                        session=session_name,
-                        file=str(session_file),
-                    )
-                    continue
 
                 client = TelegramClient(
                     str(session_file),
