@@ -111,6 +111,7 @@ async def main() -> None:
             sender_service=sender_service,
             stats_service=stats_service,
             task_repo=task_repo,
+            user_repo=user_repo,
         )
 
         logger.info("Бот настроен, запускаю polling...")

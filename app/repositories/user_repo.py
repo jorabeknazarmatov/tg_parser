@@ -47,7 +47,7 @@ class UserRepository:
         # Используем INSERT OR IGNORE для SQLite
         stmt = insert(User).prefix_with("OR IGNORE")
         await self._session.execute(stmt, users)
-        await self._session.flush()
+        await self._session.commit()
 
         # Получаем актуальное количество совпадающих хэшей
         hashes = [u["unique_hash"] for u in users]

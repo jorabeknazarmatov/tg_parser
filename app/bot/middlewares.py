@@ -29,21 +29,13 @@ def setup_middlewares(
     sender_service: "SenderService",
     stats_service: "StatsService",
     task_repo: "TaskRepository",
+    user_repo: "UserRepository",
 ) -> None:
     """
     Настраивает все middleware и внедряет зависимости.
 
     Зависимости добавляются в workflow_data диспетчера — они доступны
     во всех обработчиках через аргументы функций.
-
-    Args:
-        dp: Диспетчер aiogram
-        settings: Настройки приложения
-        account_manager: Менеджер аккаунтов
-        parser_service: Сервис парсинга
-        sender_service: Сервис рассылки
-        stats_service: Сервис статистики
-        task_repo: Репозиторий задач
     """
     # Регистрируем middleware для логирования
     dp.message.middleware(LoggingMiddleware())
@@ -56,4 +48,5 @@ def setup_middlewares(
         "sender_service": sender_service,
         "stats_service": stats_service,
         "task_repo": task_repo,
+        "user_repo": user_repo,
     })
