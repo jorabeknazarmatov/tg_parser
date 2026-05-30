@@ -69,8 +69,10 @@ class AccountRepository:
 
     async def create_or_update(self, session_name: str) -> Account:
         """
-        Создаёт новый аккаунт или возвращает существующий.
-        Используется при загрузке .session файлов.
+        Создаёт новый аккаунт или восстанавливает его при рестарте.
+        При конфликте (уже существует) сбрасывает статус на active и
+        очищает flood_until — чтобы после рестарта аккаунт был доступен.
+        Счётчики отправок и total_sent не трогает.
         """
         stmt = (
             insert(Account)
@@ -81,10 +83,16 @@ class AccountRepository:
                 total_sent=0,
                 last_reset=func.now(),
             )
-            .on_conflict_do_nothing(index_elements=["session_name"])
+            .on_conflict_do_update(
+                index_elements=["session_name"],
+                set_={
+                    "status": "active",
+                    "flood_until": None,
+                },
+            )
         )
         await self._session.execute(stmt)
-        await self._session.flush()
+        await self._session.commit()
 
         # Получаем актуальную запись
         result = await self._session.execute(
