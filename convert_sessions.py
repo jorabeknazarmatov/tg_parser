@@ -170,7 +170,10 @@ def rewrite_session(session_path: Path, data: dict) -> bool:
         except sqlite3.OperationalError:
             pass
 
-        dst_cur.execute("INSERT OR IGNORE INTO version VALUES (1)")
+        # Telethon 1.x CURRENT_VERSION = 7. Если выставить меньше,
+        # Telethon запустит _upgrade_database и упадёт с ошибкой
+        # "table update_state already exists".
+        dst_cur.execute("INSERT OR IGNORE INTO version VALUES (7)")
         dst_conn.commit()
         dst_conn.close()
         src_conn.close()
@@ -232,8 +235,26 @@ def convert_session(session_file: Path) -> str:
         return "failed"
 
 
+def restore_from_backups() -> int:
+    """
+    Восстанавливает оригинальные .session файлы из резервных копий (.session.bak).
+    Используется для повторного запуска конвертации после исправления ошибок.
+    """
+    bak_files = sorted(SESSIONS_DIR.glob("*.session.bak"))
+    restored = 0
+    for bak in bak_files:
+        # sessions/user_1.session.bak → sessions/user_1.session
+        original = bak.with_suffix("")  # убирает .bak
+        shutil.copy2(bak, original)
+        bak.unlink()
+        print(f"  🔄 Восстановлен: {original.name}")
+        restored += 1
+    return restored
+
+
 def main() -> None:
     """Конвертирует все несовместимые .session файлы в директории sessions/."""
+    import sys
     print("=" * 52)
     print("  Исправление .session файлов для Telethon")
     print("=" * 52)
@@ -241,6 +262,14 @@ def main() -> None:
     if not SESSIONS_DIR.exists():
         print(f"❌ Директория {SESSIONS_DIR} не найдена.")
         return
+
+    # Если есть резервные копии от прошлого (неудачного) запуска — восстанавливаем
+    bak_count = len(list(SESSIONS_DIR.glob("*.session.bak")))
+    if bak_count > 0:
+        print(f"\n♻️  Найдено {bak_count} резервных копий от предыдущего запуска.")
+        print("   Восстанавливаем оригиналы перед повторной конвертацией...")
+        restored = restore_from_backups()
+        print(f"   Восстановлено: {restored}\n")
 
     session_files = sorted(
         f for f in SESSIONS_DIR.glob("*.session")
@@ -251,7 +280,7 @@ def main() -> None:
         print(f"⚠️  В директории {SESSIONS_DIR} нет .session файлов.")
         return
 
-    print(f"\n📋 Найдено файлов: {len(session_files)}")
+    print(f"📋 Найдено файлов: {len(session_files)}")
 
     results = {"ok": 0, "fixed": 0, "failed": 0}
     for session_file in session_files:
