@@ -6,6 +6,6 @@ alembic==1.14.0
 apscheduler==3.10.4
 pydantic-settings==2.6.1
 structlog==24.4.0
-aiofiles==24.1.0
+aiofiles
 python-dotenv==1.0.1
 cryptg==0.4.0
