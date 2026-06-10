@@ -21,7 +21,21 @@ logger = get_logger("bot")
 # Роутер для тестовой команды
 router = Router()
 
-async def execute_send_test_logic(status_msg: Message, account_manager: "AccountManager", admin_id: int) -> None:
+async def execute_send_test_logic(
+    status_msg: Message,
+    account_manager: "AccountManager",
+    admin_id: int,
+    admin_username: str | None = None,
+) -> None:
+    if not admin_username:
+        await status_msg.edit_text(
+            "❌ <b>Ошибка:</b> у вашего аккаунта нет username.\n\n"
+            "Telethon не может отправить сообщение по числовому ID без предварительного "
+            "контакта. Установите username в настройках Telegram и повторите попытку.",
+            parse_mode="HTML",
+        )
+        return
+
     # Получаем доступный клиент
     client_data = await account_manager.get_available_client()
     if client_data is None:
@@ -45,9 +59,9 @@ async def execute_send_test_logic(status_msg: Message, account_manager: "Account
         else:
             text = "✅ Тестовое сообщение от Telegram Parser!\nСистема работает корректно."
 
-        # Отправляем сообщение администратору
-        admin_id = status_msg.from_user.id
-        await client.send_message(admin_id, text.strip())
+        # Отправляем сообщение администратору через username (Telethon всегда может
+        # разрешить username через ResolveUsername API, в отличие от числового user_id)
+        await client.send_message(f"@{admin_username}", text.strip())
 
         await status_msg.edit_text(
             f"✅ <b>Тестовое сообщение отправлено!</b>\n\n"
@@ -86,8 +100,9 @@ async def cmd_send_test(
         parse_mode="HTML",
     )
     admin_id = message.from_user.id
+    admin_username = message.from_user.username
 
-    await execute_send_test_logic(status_msg, account_manager, admin_id)
+    await execute_send_test_logic(status_msg, account_manager, admin_id, admin_username)
 
 
 # Обработчик для кнопки "Отправить тестовое сообщение" в главном меню
@@ -99,5 +114,6 @@ async def callback_send_test(query: CallbackQuery, account_manager: "AccountMana
         parse_mode="HTML",
     )
     admin_id = query.from_user.id
+    admin_username = query.from_user.username
 
-    await execute_send_test_logic(status_msg, account_manager, admin_id)
+    await execute_send_test_logic(status_msg, account_manager, admin_id, admin_username)
