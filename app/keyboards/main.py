@@ -24,6 +24,7 @@ def main_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="⏹ Остановить", callback_data="stop"),
         InlineKeyboardButton(text="👤 Аккаунты", callback_data="accounts"),
         InlineKeyboardButton(text="📋 Статус задачи", callback_data="task_status"),
+        InlineKeyboardButton(text="🧪 Тестовый запуск", callback_data="test_run"),
     )
 
     # Размещаем по 2 кнопки в строке

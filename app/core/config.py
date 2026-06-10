@@ -27,11 +27,6 @@ class Settings(BaseSettings):
     # Список ID администраторов бота
     ADMIN_IDS: list[int] = []
 
-    # ===== Telegram API =====
-    # ID и хэш приложения с https://my.telegram.org
-    API_ID: int
-    API_HASH: str
-
     # ===== Настройки парсера =====
     # За сколько дней назад учитывать активность пользователей
     ACTIVE_DAYS: int = 30

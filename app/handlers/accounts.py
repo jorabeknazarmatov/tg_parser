@@ -6,9 +6,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from app.filters.admin_filter import AdminFilter
 
@@ -18,25 +18,15 @@ if TYPE_CHECKING:
 # Роутер для команды аккаунтов
 router = Router()
 
-
-@router.message(Command("accounts"), AdminFilter())
-async def cmd_accounts(
-    message: Message,
-    account_manager: "AccountManager",
-) -> None:
-    """
-    Обработчик команды /accounts.
-    Показывает таблицу статусов всех аккаунтов.
-    """
+# Текст для команды /accounts
+async def get_accounts_text(account_manager: "AccountManager") -> str:
     statuses = await account_manager.get_all_status()
 
     if not statuses:
-        await message.answer(
+        return (
             "📭 <b>Аккаунты не найдены.</b>\n\n"
-            "Добавьте .session файлы в директорию <code>sessions/</code>",
-            parse_mode="HTML",
+            "Добавьте .session файлы в директорию <code>sessions/</code>"
         )
-        return
 
     lines = ["👤 <b>Аккаунты:</b>\n"]
 
@@ -71,5 +61,21 @@ async def cmd_accounts(
             f"{status_icon} {conn_icon} <code>{name}</code>\n"
             f"   Сегодня: {sent_today} | Всего: {total_sent}{flood_info}"
         )
+    return "\n".join(lines)
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+# Обработчик для команды /accounts
+@router.message(Command("accounts"), AdminFilter())
+async def cmd_accounts(message: Message, account_manager: "AccountManager",) -> None:
+    """
+    Обработчик команды /accounts.
+    Показывает таблицу статусов всех аккаунтов.
+    """
+    text = await get_accounts_text(account_manager)
+    await message.answer(text, parse_mode="HTML")
+
+# Обработчик для кнопки "Аккаунты" в главном меню
+@router.callback_query(F.data == "accounts", AdminFilter())
+async def callback_accounts(query: CallbackQuery, account_manager: "AccountManager",) -> None:
+    text = await get_accounts_text(account_manager)
+    await query.answer()
+    await query.message.edit_text(text, parse_mode="HTML")

@@ -5,11 +5,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from app.filters.admin_filter import AdminFilter
+from app.services import stats_service
 from app.utils.helpers import format_progress_bar
 
 if TYPE_CHECKING:
@@ -18,16 +19,8 @@ if TYPE_CHECKING:
 # Роутер для команды статистики
 router = Router()
 
-
-@router.message(Command("stats"), AdminFilter())
-async def cmd_stats(
-    message: Message,
-    stats_service: "StatsService",
-) -> None:
-    """
-    Обработчик команды /stats.
-    Показывает таблицу со всей статистикой системы.
-    """
+# Text для команды /stats
+async def stats_text(stats_service: "StatsService") -> str:
     stats = await stats_service.get_full_stats()
 
     total = stats.get("total_users", 0)
@@ -72,4 +65,16 @@ async def cmd_stats(
         f"{task_info}"
     )
 
+    return text
+
+# Обработчик для команды /stats
+@router.message(Command("stats"), AdminFilter())
+async def cmd_stats(message: Message, stats_service: "StatsService",) -> None:
+    text = await stats_text(stats_service)
     await message.answer(text, parse_mode="HTML")
+
+# Обработчик для обновления статистики по кнопке
+@router.callback_query(F.data == "stats", AdminFilter())
+async def callback_stats(query: CallbackQuery, stats_service: "StatsService",) -> None:
+    text = await stats_text(stats_service)
+    await query.message.edit_text(text, parse_mode="HTML")

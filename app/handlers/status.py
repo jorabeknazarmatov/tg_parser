@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from app.filters.admin_filter import AdminFilter
 from app.utils.helpers import format_progress_bar
@@ -33,25 +33,11 @@ TYPE_RU = {
     "send": "📨 Рассылка",
 }
 
-
-@router.message(Command("status"), AdminFilter())
-async def cmd_status(
-    message: Message,
-    task_repo: "TaskRepository",
-) -> None:
-    """
-    Обработчик команды /status.
-    Показывает статус последней задачи с прогресс-баром.
-    """
+async def text_status(task_repo: "TaskRepository") -> str:
     task = await task_repo.get_latest()
 
     if task is None:
-        await message.answer(
-            "📭 <b>Задач не найдено.</b>\n\n"
-            "Используйте /find для запуска парсинга.",
-            parse_mode="HTML",
-        )
-        return
+        return "📭 <b>Задач не найдено.</b>"
 
     # Форматируем прогресс
     progress_bar = format_progress_bar(task.progress, task.total)
@@ -64,7 +50,7 @@ async def cmd_status(
     status_text = STATUS_RU.get(task.status, task.status)
     type_text = TYPE_RU.get(task.type, task.type)
 
-    text = (
+    return (
         f"📋 <b>Статус задачи #{task.id}</b>\n\n"
         f"Тип: {type_text}\n"
         f"Статус: {status_text}\n\n"
@@ -74,4 +60,21 @@ async def cmd_status(
         f"Обновлена: {task.updated_at.strftime('%d.%m.%Y %H:%M:%S')}"
     )
 
+@router.message(Command("status"), AdminFilter())
+async def cmd_status(
+    message: Message,
+    task_repo: "TaskRepository",
+) -> None:
+    """
+    Обработчик команды /status.
+    Показывает статус последней задачи с прогресс-баром.
+    """
+    text = await text_status(task_repo)
     await message.answer(text, parse_mode="HTML")
+
+# Обработчик для кнопки "Показать статус" в главном меню
+@router.callback_query(F.data == "task_status", AdminFilter())
+async def callback_status(query: CallbackQuery, task_repo: "TaskRepository") -> None:
+    await query.answer()
+    text = await text_status(task_repo)
+    await query.message.edit_text(text, parse_mode="HTML")

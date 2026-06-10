@@ -8,9 +8,9 @@ import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, Message, CallbackQuery
 
 from app.filters.admin_filter import AdminFilter
 
@@ -19,18 +19,8 @@ if TYPE_CHECKING:
 
 router = Router()
 
-
-@router.message(Command("export_users"), AdminFilter())
-async def cmd_export_users(
-    message: Message,
-    user_repo: "UserRepository",
-) -> None:
-    """
-    Обработчик команды /export_users.
-    Формирует all_users.json из базы данных и отправляет файл в чат.
-    """
-    status_msg = await message.answer("⏳ <b>Формирую экспорт...</b>", parse_mode="HTML")
-
+# Вынесенная логика формирования и отправки файла для экспорта пользователей
+async def execute_export_logic(status_msg: Message, user_repo: "UserRepository") -> None:
     users = await user_repo.get_all_for_export()
 
     if not users:
@@ -65,8 +55,7 @@ async def cmd_export_users(
     # Имя файла с датой
     filename = f"users_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
 
-    await status_msg.delete()
-    await message.answer_document(
+    await status_msg.answer_document(
         document=BufferedInputFile(json_bytes, filename=filename),
         caption=(
             f"📦 <b>Экспорт пользователей</b>\n\n"
@@ -76,3 +65,21 @@ async def cmd_export_users(
         ),
         parse_mode="HTML",
     )
+    await status_msg.delete()
+
+# Обработчик для команды /export_users
+@router.message(Command("export_users"), AdminFilter())
+async def cmd_export_users(message: Message, user_repo: "UserRepository") -> None:
+    """
+    Обработчик команды /export_users.
+    Формирует all_users.json из базы данных и отправляет файл в чат.
+    """
+    status_msg = await message.answer("⏳ <b>Формирую экспорт...</b>", parse_mode="HTML")
+    await execute_export_logic(status_msg, user_repo)
+
+# Обработчик для кнопки "Экспорт пользователей" в главном меню
+@router.callback_query(F.data == "export_users", AdminFilter())
+async def callback_export_users(query: CallbackQuery, user_repo: "UserRepository") -> None:
+    await query.answer()
+    status_msg = await query.message.edit_text("⏳ <b>Формирую экспорт...</b>", parse_mode="HTML")
+    await execute_export_logic(status_msg, user_repo)

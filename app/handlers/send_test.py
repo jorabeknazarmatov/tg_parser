@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from app.core.logging import get_logger
 from app.filters.admin_filter import AdminFilter
@@ -21,22 +21,7 @@ logger = get_logger("bot")
 # Роутер для тестовой команды
 router = Router()
 
-
-@router.message(Command("send_test"), AdminFilter())
-async def cmd_send_test(
-    message: Message,
-    account_manager: "AccountManager",
-    settings: "Settings",
-) -> None:
-    """
-    Обработчик команды /send_test.
-    Отправляет тестовое сообщение администратору через первый доступный аккаунт.
-    """
-    status_msg = await message.answer(
-        "🔄 <b>Отправляю тестовое сообщение...</b>",
-        parse_mode="HTML",
-    )
-
+async def execute_send_test_logic(status_msg: Message, account_manager: "AccountManager", admin_id: int) -> None:
     # Получаем доступный клиент
     client_data = await account_manager.get_available_client()
     if client_data is None:
@@ -48,7 +33,6 @@ async def cmd_send_test(
         return
 
     client, account = client_data
-
     try:
         # Загружаем текст сообщения
         import aiofiles
@@ -62,7 +46,7 @@ async def cmd_send_test(
             text = "✅ Тестовое сообщение от Telegram Parser!\nСистема работает корректно."
 
         # Отправляем сообщение администратору
-        admin_id = message.from_user.id
+        admin_id = status_msg.from_user.id
         await client.send_message(admin_id, text.strip())
 
         await status_msg.edit_text(
@@ -86,3 +70,34 @@ async def cmd_send_test(
         )
     finally:
         account_manager.release_client(account.session_name)
+
+
+@router.message(Command("send_test"), AdminFilter())
+async def cmd_send_test(
+    message: Message,
+    account_manager: "AccountManager",
+) -> None:
+    """
+    Обработчик команды /send_test.
+    Отправляет тестовое сообщение администратору через первый доступный аккаунт.
+    """
+    status_msg = await message.answer(
+        "🔄 <b>Отправляю тестовое сообщение...</b>",
+        parse_mode="HTML",
+    )
+    admin_id = message.from_user.id
+
+    await execute_send_test_logic(status_msg, account_manager, admin_id)
+
+
+# Обработчик для кнопки "Отправить тестовое сообщение" в главном меню
+@router.callback_query(F.data == "test_run", AdminFilter())
+async def callback_send_test(query: CallbackQuery, account_manager: "AccountManager") -> None:
+    await query.answer()
+    status_msg = await query.message.edit_text(
+        "🔄 <b>Отправляю тестовое сообщение...</b>",
+        parse_mode="HTML",
+    )
+    admin_id = query.from_user.id
+
+    await execute_send_test_logic(status_msg, account_manager, admin_id)
